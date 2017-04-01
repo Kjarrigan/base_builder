@@ -1,6 +1,18 @@
 require 'gosu'
 
-Tile = Struct.new :x, :y, :type, :img
+class Tile
+  attr_reader :img
+  def initialize(x,y,type)
+    @x, @y = x, y
+    self.type = type
+  end
+  
+  def type=(val)
+    @type = val
+    @img = AssetManager.load_tile(val)
+  end
+end
+  
 class Map
   TILE_SIZE = 32
   
@@ -11,7 +23,7 @@ class Map
     width.times do |x|
       @tiles[x] ||= {}
       height.times do |y|
-        @tiles[x][y] = Tile.new(x, y, :Ground, AssetManager.load_tile(:Gras))
+        @tiles[x][y] = Tile.new(x, y, :Ground)
       end
     end
     update
@@ -34,6 +46,20 @@ class Map
   def tile_at(x,y)
     x = (x / TILE_SIZE).floor
     @tiles[x] && @tiles[x][(y / TILE_SIZE).floor]
+  end
+  
+  def tiles_between(x1, y1, x2, y2)
+    tiles = []
+    
+    x1, x2 = x2, x1 if x1 > x2
+    y1, y2 = y2, y1 if y1 > y2
+    (x1..x2).step(TILE_SIZE).each do |tx|
+      (y1..y2).step(TILE_SIZE).each do |ty|
+        tiles << tile_at(tx,ty)
+      end
+    end
+    p tiles
+    tiles.compact
   end
 end
 
@@ -87,6 +113,7 @@ class Window < Gosu::Window
     
     @log = Gosu::Font.new(12)
     @messages = []
+    @current_action = nil
     @last_tick = Hash.new(0)
     
     @map = Map.new(50,50)
@@ -109,7 +136,8 @@ class Window < Gosu::Window
   end
   
   def draw
-    @log.draw(@messages.first, 10, 10, 50, 1, 1, 0xff_ff00ff)
+    @log.draw_rel(@action_mode, self.width-10, 10, 50, 1.0, 0.0)
+    @log.draw(@messages.first, 10, 10, 50)
     
     Gosu.scale(@camera.zoom) do
       Gosu.translate(@camera.x, @camera.y) do
@@ -119,25 +147,31 @@ class Window < Gosu::Window
   end
   
   def button_down(id)
+    @messages << "Button pressed: #{Gosu.button_id_to_char(id)} (#{id})"
+    case id
+    when Gosu::MS_LEFT
+      @dragging_started_at = [mouse_x + @camera.x, mouse_y + @camera.y]
+    end
   end
   
   def button_up(id)
     @messages << "Button released: #{Gosu.button_id_to_char(id)} (#{id})"
     case id
     when Gosu::MS_LEFT
-      if @build_mode
-        tile = @map.tile_at(mouse_x + @camera.x, mouse_y + @camera.y)
-        return unless tile
-        p @build_obj
-        tile.type = @build_obj
-        tile.img = AssetManager.load_tile(@build_obj)
+      if @action_mode == :Build
+        tiles = @map.tiles_between(*@dragging_started_at, mouse_x + @camera.x, mouse_y + @camera.y)
+        return if tiles.empty?
+        
+        tiles.each do |t|
+          t.type = @build_obj
+        end
         @map.update
       end
     when Gosu::MS_WHEEL_UP then @camera.zoom += 0.1
     when Gosu::MS_WHEEL_DOWN then @camera.zoom -= 0.1
       
     when Gosu::KB_1
-      @build_mode = true
+      @action_mode = :Build
       @build_obj = :Floor
     end
   end
