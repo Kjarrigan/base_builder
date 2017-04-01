@@ -1,9 +1,11 @@
 require 'gosu'
 
 class Tile
-  attr_reader :img
+  attr_reader :x, :y
+  attr_reader :img, :features
   def initialize(x,y,type)
     @x, @y = x, y
+    @features = []
     self.type = type
   end
   
@@ -40,7 +42,24 @@ class Map
   end
   
   def draw
+    # Static part
     @image.draw(0,0,0)
+    
+    # Tiles features
+    each do |x,y,t|
+      next if t.features.empty?
+      t.features.each do |f|
+        AssetManager.load_tile(f).draw(x*TILE_SIZE, y*TILE_SIZE, 1)
+      end
+    end
+  end
+  
+  def each
+    @tiles.each do |x, rows|
+      rows.each do |y, tile|
+        yield(x,y,tile)
+      end
+    end    
   end
   
   def tile_at(x,y)
@@ -58,14 +77,14 @@ class Map
         tiles << tile_at(tx,ty)
       end
     end
-    p tiles
     tiles.compact
   end
 end
 
 class Camera
   attr_reader :x, :y, :zoom
-  def initialize()
+  def initialize(win)
+    @win = win # Unfortunately mouse_x and mouse_y aren't Gosu::module methods yet
     @x = 0
     @y = 0
     @zoom = 1.0
@@ -89,6 +108,14 @@ class Camera
   def speed
     20 / @zoom
   end
+  
+  def mouse_x_world
+    @win.mouse_x + self.x
+  end
+  
+  def mouse_y_world
+    @win.mouse_y + self.y
+  end  
   
   def to_s
     format "Zoom: %.2f | x: %d | y: %d", @zoom, @x, @y
@@ -118,7 +145,7 @@ class Window < Gosu::Window
     
     @map = Map.new(50,50)
     
-    @camera = Camera.new
+    @camera = Camera.new(self)
   end
   
   def update
@@ -132,7 +159,7 @@ class Window < Gosu::Window
       
       @messages.shift
       @last_tick[2000] = Gosu.milliseconds 
-    end    
+    end
   end
   
   def draw
@@ -142,6 +169,22 @@ class Window < Gosu::Window
     Gosu.scale(@camera.zoom) do
       Gosu.translate(@camera.x, @camera.y) do
         @map.draw
+    
+        if @dragging_started_at 
+          if @action_mode == :Build
+            tiles = @map.tiles_between(*@dragging_started_at, @camera.mouse_x_world, @camera.mouse_y_world)
+            tiles.each do |t|
+              AssetManager.load_tile(:Build_Preview).draw(t.x*Map::TILE_SIZE, t.y*Map::TILE_SIZE,1)
+            end
+          else
+            x1, y1 = *@dragging_started_at
+            x2, y2 = @camera.mouse_x_world, @camera.mouse_y_world
+            Gosu.draw_quad(x1,y1,0x80_ff0000,
+                           x1,y2,0x80_ff0000,
+                           x2,y2,0x80_ff0000,
+                           x2,y1,0x80_ff0000, 1)
+          end
+        end        
       end
     end
   end
@@ -150,7 +193,7 @@ class Window < Gosu::Window
     @messages << "Button pressed: #{Gosu.button_id_to_char(id)} (#{id})"
     case id
     when Gosu::MS_LEFT
-      @dragging_started_at = [mouse_x + @camera.x, mouse_y + @camera.y]
+      @dragging_started_at = [@camera.mouse_x_world, @camera.mouse_y_world]
     end
   end
   
@@ -159,20 +202,23 @@ class Window < Gosu::Window
     case id
     when Gosu::MS_LEFT
       if @action_mode == :Build
-        tiles = @map.tiles_between(*@dragging_started_at, mouse_x + @camera.x, mouse_y + @camera.y)
-        return if tiles.empty?
+        tiles = @map.tiles_between(*@dragging_started_at, @camera.mouse_x_world, @camera.mouse_y_world)
         
         tiles.each do |t|
           t.type = @build_obj
         end
-        @map.update
+        @map.update unless tiles.empty?
       end
+      @dragging_started_at = nil
     when Gosu::MS_WHEEL_UP then @camera.zoom += 0.1
     when Gosu::MS_WHEEL_DOWN then @camera.zoom -= 0.1
       
     when Gosu::KB_1
       @action_mode = :Build
       @build_obj = :Floor
+      
+    when Gosu::KB_ESCAPE
+      @action_mode = nil
     end
   end
   
