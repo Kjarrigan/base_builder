@@ -1,4 +1,4 @@
-= Working Title: Base Builder
+# Base Builder
 
 Inspired by the Youtube-Series from @quill18 (Project Porcupine) I'll try to implement a "base builder" in 
 Ruby with Gosu as Backend. As I haven't done any "big" game so far I hope to get a feeling which Gosu.issues
