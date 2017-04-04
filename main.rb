@@ -1,4 +1,5 @@
 require 'gosu'
+require 'pry'
 
 class Tile
   attr_reader :x, :y
@@ -11,7 +12,13 @@ class Tile
   
   def type=(val)
     @type = val
-    @img = AssetManager.load_tile(val)
+    @img = AssetManager.tile(val)
+    raise "No assets #{val.inspect} found!" if @img.nil?
+  end
+
+  # Returns only the "base"-type
+  def type
+    @type.to_s.split('_')[0].to_sym
   end
 end
   
@@ -49,7 +56,7 @@ class Map
     each do |x,y,t|
       next if t.features.empty?
       t.features.each do |f|
-        AssetManager.load_tile(f).draw(x*TILE_SIZE, y*TILE_SIZE, 1)
+        AssetManager.tile(f).draw(x*TILE_SIZE, y*TILE_SIZE, 1)
       end
     end
   end
@@ -78,6 +85,24 @@ class Map
       end
     end
     tiles.compact
+  end
+
+  def get_neighbours_for(tile)
+    {
+      N: @tiles[tile.x][tile.y-1],
+      E: @tiles[tile.x+1][tile.y],
+      S: @tiles[tile.x][tile.y+1],
+      W: @tiles[tile.x-1][tile.y],
+    }
+  end
+
+  # Friends are all tiles of same type
+  def get_friends_directions_for(tile)
+    get_friends_for(tile).keys
+  end
+
+  def get_friends_for(tile)
+    get_neighbours_for(tile).select{|_, t| t.type == tile.type }
   end
 end
 
@@ -123,10 +148,54 @@ class Camera
 end    
 
 module AssetManager
-  def self.load_tile(name)
-    return @tiles[name] if @tiles && @tiles[name]
-    @tiles ||= {} 
-    @tiles[name] = Gosu::Image.new(File.join(__dir__, 'assets', "#{name}.png"))
+  SubimageMap = {
+    # Walls
+    # Solo
+     1 => :Wall,
+
+    # 1-neighbour
+    13 => :Wall_N,
+     2 => :Wall_E,
+    14 => :Wall_S,
+     5 => :Wall_W,
+
+    # 2-neighbours
+    12 => :Wall_N_S,
+    11 => :Wall_E_W,
+
+     6 => :Wall_N_E,
+     4 => :Wall_E_S,
+     3 => :Wall_S_W,
+     7 => :Wall_N_W,
+
+    # 3-neighbours
+    16 => :Wall_N_E_W,
+     9 => :Wall_N_S_W,
+    10 => :Wall_N_E_S,
+     8 => :Wall_E_S_W,
+
+    # 4-neighbours
+    15 => :Wall_N_E_S_W,
+
+    49 => :Build_Preview,
+
+    33 => :Ground,
+    34 => :Floor,
+  }
+  def self.tile(name)
+    @tiles[name]
+  end
+
+  def self.load_tileset
+    @tileset = Gosu::Image.new(File.join(__dir__, 'assets', "Tileset.png"), tileable: true)
+    @tiles = {}
+    SubimageMap.each do |slot, tile_name|
+      x = (slot-1) % 16 * Map::TILE_SIZE
+      y = (slot-1) / 16 * Map::TILE_SIZE
+      w = h = Map::TILE_SIZE
+      puts "Extract #{tile_name} from P(#{x},#{y}), D(#{w},#{h})"
+      @tiles[tile_name] = @tileset.subimage(x, y, w, h)
+    end
   end
 end
 
@@ -142,6 +211,7 @@ class Window < Gosu::Window
     @messages = []
     @current_action = nil
     @last_tick = Hash.new(0)
+    AssetManager.load_tileset
     
     @map = Map.new(50,50)
     
@@ -174,7 +244,7 @@ class Window < Gosu::Window
           if @action_mode == :Build
             tiles = @map.tiles_between(*@dragging_started_at, @camera.mouse_x_world, @camera.mouse_y_world)
             tiles.each do |t|
-              AssetManager.load_tile(:Build_Preview).draw(t.x*Map::TILE_SIZE, t.y*Map::TILE_SIZE,1)
+              AssetManager.tile(:Build_Preview).draw(t.x*Map::TILE_SIZE, t.y*Map::TILE_SIZE,1)
             end
           else
             x1, y1 = *@dragging_started_at
@@ -201,28 +271,46 @@ class Window < Gosu::Window
     @messages << "Button released: #{Gosu.button_id_to_char(id)} (#{id})"
     case id
     when Gosu::MS_LEFT
-      if @action_mode == :Build
-        tiles = @map.tiles_between(*@dragging_started_at, @camera.mouse_x_world, @camera.mouse_y_world)
-        
-        tiles.each do |t|
-          t.type = @build_obj
-        end
-        @map.update unless tiles.empty?
-      end
+      build_object if @action_mode == :Build
       @dragging_started_at = nil
     when Gosu::MS_WHEEL_UP then @camera.zoom += 0.1
     when Gosu::MS_WHEEL_DOWN then @camera.zoom -= 0.1
-      
-    when Gosu::KB_1
-      @action_mode = :Build
-      @build_obj = :Floor
-      
+    when Gosu::KB_1 then build_mode :Floor
+    when Gosu::KB_2 then build_mode :Wall
+    when Gosu::KB_F1 then $debug = !$debug
     when Gosu::KB_ESCAPE
       @action_mode = nil
     end
   end
   
   def needs_cursor?; true; end
+
+  def build_mode(type)
+    @action_mode = :Build
+    @build_obj = type
+  end
+
+  def build_object
+    tiles = @map.tiles_between(*@dragging_started_at, @camera.mouse_x_world, @camera.mouse_y_world)
+
+    tiles.each do |t|
+      val = @build_obj
+      t.type = val
+      if val == :Wall
+        friends = update_connected_tile(t)
+        friends.each do |_,f| update_connected_tile(f) end
+      end
+    end
+    @map.update unless tiles.empty?
+  end
+
+  def update_connected_tile(tile)
+    friends = @map.get_friends_for(tile)
+    binding.pry if $debug
+    tile.type = [tile.type, *friends.keys].join('_').to_sym
+    friends
+  end
 end
 
+$debug = false
 Window.new.show if $0 == __FILE__
