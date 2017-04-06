@@ -2,7 +2,8 @@
 
 ## Next Session
 
-* Add wall-building with connected textures
+* Add placement sound
+* Fix the texture bugs
 
 ## Somewhat "short-term"
 
@@ -13,3 +14,7 @@
 
 * If you drag upwards/left the "last" tile flickers.
   my guess: the swap in Map.tiles_between
+
+* If you replace a wall with an floor the walls didn't reconnect
+
+* If you replace tiles while they where in the build queue the sometimes are rendered as black black black/empty squares
